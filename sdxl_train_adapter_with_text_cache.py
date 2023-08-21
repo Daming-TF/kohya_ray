@@ -265,8 +265,10 @@ def train(args):
         sdxl_adapter = SdxlT2IAdapter(sk=True, use_conv=False)
     else:
         assert os.path.exists(args.adapter_resume_path), f"adapter_resume_path {args.adapter_resume_path} does not exist"
-        sdxl_adapter = sdxl_train_util.load_xl_model(args, accelerator, 'adapter', weight_dtype)
-
+        from tool_mjh.model_util import load_adapter
+        print('loading resume ckpt .....')
+        load_resume, sdxl_adapter, ckpt_info = load_adapter(accelerator, args.adapter_resume_path)
+        # sdxl_adapter = sdxl_train_util.load_xl_model(args, accelerator, 'adapter', weight_dtype)
 
     # logit_scale = logit_scale.to(accelerator.device, dtype=weight_dtype)
 
@@ -466,7 +468,6 @@ def train(args):
     accelerator.print(f"  total optimization steps / 学習ステップ数: {args.max_train_steps}")
 
     progress_bar = tqdm(range(args.max_train_steps), smoothing=0, disable=not accelerator.is_local_main_process, desc="steps")
-    global_step = 0
 
     noise_scheduler = DDPMScheduler(
         beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000, clip_sample=False
@@ -481,7 +482,12 @@ def train(args):
     infer_content_embeddings = None
     ori_img_name = None
     fixed_crop_emb = None
-    for epoch in range(num_train_epochs):
+
+    (start_epoch, global_step) = (0, 0) if load_resume is None else ckpt_info
+    print(f'start epoch:{start_epoch}\ttrain epoch:{num_train_epochs}')
+    assert start_epoch <= num_train_epochs
+    print()
+    for epoch in range(start_epoch, num_train_epochs):
         accelerator.print(f"\nepoch {epoch+1}/{num_train_epochs}")
         current_epoch.value = epoch + 1
 

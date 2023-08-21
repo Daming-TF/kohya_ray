@@ -107,12 +107,12 @@ def load_adapters_from_sdxl_checkpoint(model_version, ckpt_path, map_location, i
     print("building SDXL-adapter")
     adapter = sdxl_t2i_adapter.SdxlT2IAdapter(sk=True, use_conv=False) if not isfull else sdxl_t2i_adapter.SdxlT2IAdapterFull()
 
-    print("loading SDXL-adapter from checkpoint")
+    print(f"loading SDXL-adapter from checkpoint >>{at-step00050000.ckpt}<< ......")
     adapter_sd = {}
     for k in list(state_dict.keys()):
         if k.startswith("model.sdxl_adapter."):
             adapter_sd[k.replace("model.sdxl_adapter.", "")] = state_dict.pop(k)
-    info = adapter.load_state_dict(adapter_sd)
+    adapter.load_state_dict(adapter_sd)
     del adapter_sd
 
     ckpt_info = (epoch, global_step) if epoch is not None else None
