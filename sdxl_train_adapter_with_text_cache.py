@@ -571,7 +571,6 @@ def train(args):
                     [text_encoder1, text_encoder2],
                     unet,
                 )
-                
 
                 # Save the model for each specified step
                 if args.save_every_n_steps is not None and global_step % args.save_every_n_steps == 0:

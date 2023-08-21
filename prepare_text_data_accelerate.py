@@ -25,6 +25,8 @@ IMAGE_TRANSFORMS = transforms.Compose(
     ]
 )
 
+LOCK = multiprocessing.Lock()
+
 
 # def acquire_file_lock(file_path):
 #     lock_file = open(file_path, 'r', encoding='utf-8')
@@ -140,39 +142,63 @@ def get_null_token(args, tokenizers, text_encoders):
     return
 
 
-def save_metadata(meta_data, lock, json_path):
-    lock_enable = False
-    # with lock:
-    try:
-        # if os.path.exists(json_path):
-        file = open(json_path, 'r+', encoding="utf-8")
-        fd = file.fileno()
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        # lock_enable = True
+def check_json(json_path):
+    with open(json_path, 'r', encoding="utf-8") as file:
         data = json.load(file)
-        for key, value in data.items():
-            meta_data[key] = value
+    for key, value in data.items():
+        assert 'npz_path' in data[key].keys()
 
-        json.dump(meta_data, file, indent=2)
 
-        # if os.path.exists(json_path):
-        #     with open(json_path, "r", encoding='utf-8') as file:
-        #         data = json.load(json_path)
-        #
-        #     for key, value in data.items():
-        #             meta_data[key] = value
-                # else:
-                #     print(f'some image in two processing  >>  {key}')
+def save_metadata(meta_data, json_path):
+    with LOCK:
+        if not os.path.exists(json_path):
+            with open(json_path, "w", encoding="utf-8") as _:
+                json.dump({}, _, indent=2)
+                print(f"creating file >>{json_path}<<")
+        with open(json_path, 'r+', encoding="utf-8") as file:
+            data = json.load(file)
+            file.seek(0)
 
-        # with open(json_path, "w", encoding="utf-8") as file:
-        #     json.dump(meta_data, file, indent=2)
+            for key, value in data.items():
+                if 'npz_path' in data[key].keys():
+                    meta_data[key]=value
 
-        # if lock_enable:
-            # release_file_lock(lock_file)
-    finally:
-        # if lock_enable:
-        file.close()
-        fcntl.flock(fd, fcntl.LOCK_UN)
+            json.dump(meta_data, file, indent=2)
+
+        print(f"Total img {len(meta_data.keys())} : writing in >>{json_path}<<")
+
+    # lock_enable = False
+    # # with lock:
+    # try:
+    #     # if os.path.exists(json_path):
+    #     file = open(json_path, 'r+', encoding="utf-8")
+    #     fd = file.fileno()
+    #     fcntl.flock(fd, fcntl.LOCK_EX)
+    #     # lock_enable = True
+    #     data = json.load(file)
+    #     for key, value in data.items():
+    #         meta_data[key] = value
+    #
+    #     json.dump(meta_data, file, indent=2)
+    #
+    #     # if os.path.exists(json_path):
+    #     #     with open(json_path, "r", encoding='utf-8') as file:
+    #     #         data = json.load(json_path)
+    #     #
+    #     #     for key, value in data.items():
+    #     #             meta_data[key] = value
+    #             # else:
+    #             #     print(f'some image in two processing  >>  {key}')
+    #
+    #     # with open(json_path, "w", encoding="utf-8") as file:
+    #     #     json.dump(meta_data, file, indent=2)
+    #
+    #     # if lock_enable:
+    #         # release_file_lock(lock_file)
+    # finally:
+    #     # if lock_enable:
+    #     file.close()
+    #     fcntl.flock(fd, fcntl.LOCK_UN)
 
 
 
@@ -220,9 +246,8 @@ def _init(args):
     # accelerate
     accelerator = Accelerator()
     args.device = accelerator.device
-    lock = multiprocessing.Lock()
 
-    return metadata, image_paths, bucket_manager, accelerator, lock
+    return metadata, image_paths, bucket_manager, accelerator
 
 
 def _load_model(args):
@@ -243,7 +268,7 @@ def _load_model(args):
 
 def main(args):
     # init
-    metadata, image_paths, bucket_manager, accelerator, lock = _init(args)
+    metadata, image_paths, bucket_manager, accelerator = _init(args)
 
     # load model
     vae, text_encoder1, text_encoder2, tokenizer1, tokenizer2 = _load_model(args)
@@ -431,8 +456,12 @@ def main(args):
 
     # save metadata to json
     print(f"writing metadata: {args.out_json}")
-    save_metadata(metadata, lock, args.out_json)
+    save_metadata(metadata, args.out_json)
     print("done!")
+
+    # check legality
+    if accelerate.get_rank() == 0:
+        check_json(args.out_json)
 
 
 def setup_parser() -> argparse.ArgumentParser:
