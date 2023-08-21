@@ -5,7 +5,7 @@ export OUT_DIR="/mnt/nfs/file_server/public/mingjiahui/data/debug/result"
 export lineart_dir="/mnt/nfs/file_server/public/mingjiahui/data/LAION12M-highreso/depth"
 
 
-CUDA_VISIBLE_DEVICES=0,2,3,4,5,6,7 /home/mingjiahui/anaconda3/envs/T2I/bin/accelerate launch --main_process_port 29590 sdxl_train_adapter_with_text_cache.py --pretrained_model_name_or_path=$MODEL_DIR \
+CUDA_VISIBLE_DEVICES=3,4,5,6, /home/mingjiahui/anaconda3/envs/T2I/bin/accelerate launch --main_process_port 29590 sdxl_train_adapter_with_text_cache.py --pretrained_model_name_or_path=$MODEL_DIR \
                                                 --in_json $META_FILE \
                                                 --learning_rate=1e-4 --train_batch_size=1 \
                                                 --diffusers_xformers --gradient_checkpointing \

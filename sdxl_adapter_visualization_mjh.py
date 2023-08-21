@@ -6,7 +6,7 @@ import torch
 from tqdm import tqdm
 from library import model_util, sdxl_model_util
 
-adapter_ckpt_path = "/mnt/nfs/file_server/public/mingjiahui/data/debug/result/at-step00005000.ckpt"
+adapter_ckpt_path = "/mnt/nfs/file_server/public/mingjiahui/data/debug/result/at-step00030000.ckpt"
 sd_adapter, _ = sdxl_model_util.load_adapters_from_sdxl_checkpoint(sdxl_model_util.MODEL_VERSION_SDXL_BASE_V0_9, adapter_ckpt_path, "cpu")
 
 
@@ -38,11 +38,18 @@ def plot_feature(feature, title):
 
 print(f'feature:{feature[0].shape}')
 features = [i.squeeze(0).detach().numpy() for i in y]
-res = np.mean(features[0], axis=0)
+for i in range(len(features)):
+    res = np.mean(features[i], axis=0)
+    res = 255 * (res - np.min(res)) / (np.max(res) - np.min(res))
+    res = res.astype(np.uint8)
+    print(res)
 
-save_name = os.path.splitext(os.path.basename(adapter_ckpt_path))[0]+'.png'
-save_path = fr'/home/mingjiahui/data/debug/{save_name}'
-cv2.imwrite(save_path, res)
+    save_name = os.path.splitext(os.path.basename(adapter_ckpt_path))[0]+'.png'
+    save_path = fr'/home/mingjiahui/data/debug/{i}_{save_name}'
+    cv2.imwrite(save_path, res)
+    print(f"done! img has writed in >>{save_path}<<")
+
+
 # for i in range(features[0].shape[0]):
 #     print(features[0][i].shape)
 #     res = np.mean(features[0][i])

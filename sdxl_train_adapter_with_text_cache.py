@@ -33,7 +33,8 @@ from diffusers import EulerDiscreteScheduler
 from PIL import Image
 
 @torch.no_grad() 
-def inference_samples(unet, vae, controller, ori_image_path, text_embeddings, content_embeddings, latents_dict=None):
+def inference_samples(unet, vae, controller, ori_image_path, text_embeddings, content_embeddings, latents_dict=None,
+                      debug=False):
     # settings
     target_num = 1
     steps = 25
@@ -103,7 +104,7 @@ def inference_samples(unet, vae, controller, ori_image_path, text_embeddings, co
             latent_model_input = latents.repeat((num_latent_input, 1, 1, 1))
             latent_model_input = scheduler.scale_model_input(latent_model_input, t)
             latent_model_input = latent_model_input.to(DEVICE, dtype=DTYPE)
-            adapter_features = [i[:1, :, :, :].clone().repeat(2,1,1,1) for i in controller]
+            adapter_features = [i[:1, :, :, :].clone().repeat(2,1,1,1) for i in controller]     # 为啥一定需要输入两个batch进去
             noise_pred = unet(latent_model_input, t, to_text_embeddings, to_vector_embeddings, adapter_features=adapter_features)
 
             noise_pred_uncond, noise_pred_text = noise_pred.chunk(num_latent_input)  # uncond by negative prompt
@@ -129,8 +130,9 @@ def inference_samples(unet, vae, controller, ori_image_path, text_embeddings, co
 
         img_dir, img_name = os.path.split(image_path)
         model_type = "midas_v21_small_256"
-        # condition_dir = img_dir.replace('image', 'depth')     # debug
-        condition_dir = os.path.join('/mnt/nfs/file_server/public/mingjiahui/data/LAION12M-highreso/depth', os.path.basename(img_dir))
+        condition_dir = img_dir.replace('image', 'depth') if debug \
+            else os.path.join('/mnt/nfs/file_server/public/mingjiahui/data/LAION12M-highreso/depth', os.path.basename(img_dir))   # debug
+        # condition_dir = os.path.join('/mnt/nfs/file_server/public/mingjiahui/data/LAION12M-highreso/depth', os.path.basename(img_dir))      # train
         condition_name = os.path.splitext(img_name)[0] + '-' + model_type + '.png'
         sketch_image_path = os.path.join(condition_dir, condition_name)
         sketch_image = np.array(Image.open(sketch_image_path).convert('L')) # HxWx3 0-255
@@ -164,11 +166,11 @@ def train(args):
     use_dreambooth_method = args.in_json is None
 
     if args.seed is not None:
-        set_seed(args.seed)  # 乱数系列を初期化する
+        set_seed(args.seed)
 
     tokenizer1, tokenizer2 = sdxl_train_util.load_tokenizers(args)
 
-    # データセットを準備する
+    # prepare dataset
     if args.dataset_class is None:
         blueprint_generator = BlueprintGenerator(ConfigSanitizer(True, True, False, True, True))
         if args.dataset_config is not None:
@@ -193,7 +195,7 @@ def train(args):
                         }
                     ]
                 }
-            else:
+            else:       # no in_json denote use finetune(T2IAdapter) method
                 print("Training with captions.")
                 user_config = {
                     "datasets": [
@@ -238,15 +240,16 @@ def train(args):
         assert (
             train_dataset_group.is_text_encoder_output_cacheable()
         ), "when caching text encoder output, either caption_dropout_rate, shuffle_caption, token_warmup_step or caption_tag_dropout_rate cannot be used / text encoderの出力をキャッシュするときはcaption_dropout_rate, shuffle_caption, token_warmup_step, caption_tag_dropout_rateは使えません"
-    # acceleratorを準備する
+
+    # prapare accelerator
     print("prepare accelerator")
     accelerator = train_util.prepare_accelerator(args)
 
-    # mixed precisionに対応した型を用意しておき適宜castする
+    # mixed precision setting
     weight_dtype, save_dtype = train_util.prepare_dtype(args)
     vae_dtype = torch.float32 if args.no_half_vae else weight_dtype
 
-    # モデルを読み込む
+    # load model
     (
         load_stable_diffusion_format,
         text_encoder1,
@@ -283,7 +286,7 @@ def train(args):
         use_safetensors = args.use_safetensors or ("safetensors" in args.save_model_as.lower())
         assert save_stable_diffusion_format, "save_model_as must be ckpt or safetensors / save_model_asはckptかsafetensorsである必要があります"
 
-    # Diffusers版のxformers使用フラグを設定する関数
+    # xformer setting (Diffusers)
     def set_diffusers_xformers_flag(model, valid):
         def fn_recursive_set_mem_eff(module: torch.nn.Module):
             if hasattr(module, "set_use_memory_efficient_attention_xformers"):
@@ -294,15 +297,15 @@ def train(args):
 
         fn_recursive_set_mem_eff(model)
 
-    # モデルに xformers とか memory efficient attention を組み込む
+    # Add xformers or memory efficient attention to the model
     if args.diffusers_xformers:
-        # もうU-Netを独自にしたので動かないけどVAEのxformersは動くはず
+        # I already have my own U-Net, so it won't work, but VAE's xformers should.
         accelerator.print("Use xformers by Diffusers")
         unet.set_use_memory_efficient_attention(True, False)
         set_diffusers_xformers_flag(vae, True)
         # set_diffusers_xformers_flag(unet, True)
     else:
-        # Windows版のxformersはfloatで学習できなかったりxformersを使わない設定も可能にしておく必要がある
+        # Windows xformers cannot learn with float, and you need to set them not to use xformers
         accelerator.print("Disable Diffusers' xformers")
         train_util.replace_unet_modules(unet, args.mem_eff_attn, args.xformers, args.sdpa)
         vae.set_use_memory_efficient_attention_xformers(args.xformers)
@@ -319,6 +322,7 @@ def train(args):
     #         torch.cuda.empty_cache()
     #     gc.collect()
     #     accelerator.wait_for_everyone()
+
     vae.to("cpu", dtype=vae_dtype)
     vae.requires_grad_(False)
     vae.eval()
@@ -339,7 +343,7 @@ def train(args):
         accelerator.wait_for_everyone()
 
 
-    # 学習を準備する：モデルを適切な状態にする
+    # Ready to learn: Get the model in the right state
     training_models = []
     if args.gradient_checkpointing:
         unet.enable_gradient_checkpointing()
@@ -362,12 +366,11 @@ def train(args):
     accelerator.print(f"number of models: {len(training_models)}")
     accelerator.print(f"number of trainable parameters: {n_params}")
 
-    # 学習に必要なクラスを準備する
+    # prepare optimizer
     accelerator.print("prepare optimizer, data loader etc.")
     _, _, optimizer = train_util.get_optimizer(args, trainable_params=params_to_optimize)
 
-    # dataloaderを準備する
-    # DataLoaderのプロセス数：0はメインプロセスになる
+    # prepare dataloader
     n_workers = min(args.max_data_loader_n_workers, os.cpu_count() - 1)  # cpu_count-1 ただし最大で指定された数まで
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset_group,
@@ -378,20 +381,20 @@ def train(args):
         persistent_workers=args.persistent_data_loader_workers,
     )
 
-    # 学習ステップ数を計算する
+    # Count the number of learning steps
     if args.max_train_epochs is not None:
         args.max_train_steps = args.max_train_epochs * math.ceil(
             len(train_dataloader) / accelerator.num_processes / args.gradient_accumulation_steps
         )
         accelerator.print(f"override steps. steps for {args.max_train_epochs} epochs is / 指定エポックまでのステップ数: {args.max_train_steps}")
 
-    # データセット側にも学習ステップを送信
+    # Send learning steps to the data set
     train_dataset_group.set_max_train_steps(args.max_train_steps)
 
-    # lr schedulerを用意する
+    # prepare lr scheduler
     lr_scheduler = train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes)
 
-    # 実験的機能：勾配も含めたfp16学習を行う　モデル全体をfp16にする
+    # Experimental function: Set the entire model of fp16 learning to fp16, including gradient.
     if args.full_fp16:
         assert (
             args.mixed_precision == "fp16"
@@ -411,7 +414,6 @@ def train(args):
         text_encoder1.to(weight_dtype)
         text_encoder2.to(weight_dtype)
 
-    # acceleratorがなんかよろしくやってくれるらしい
     if args.train_text_encoder:
         unet, text_encoder1, text_encoder2, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
             unet, text_encoder1, text_encoder2, optimizer, train_dataloader, lr_scheduler
@@ -437,20 +439,20 @@ def train(args):
     #     text_encoder1.to(accelerator.device)
     #     text_encoder2.to(accelerator.device)
 
-    # 実験的機能：勾配も含めたfp16学習を行う　PyTorchにパッチを当ててfp16でのgrad scaleを有効にする
+    # Experimental function: fp16 learning on PyTorch, including gradients, to enable grad scale on fp16
     if args.full_fp16:
         train_util.patch_accelerator_for_fp16_training(accelerator)
 
-    # resumeする
+    # resume
     train_util.resume_from_local_or_hf_if_specified(accelerator, args)
 
-    # epoch数を計算する
+    # count epoch
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
     if (args.save_n_epoch_ratio is not None) and (args.save_n_epoch_ratio > 0):
         args.save_every_n_epochs = math.floor(num_train_epochs / args.save_n_epoch_ratio) or 1
 
-    # 学習する
+    # train processing
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
     accelerator.print("running training / 学習開始")
     accelerator.print(f"  num examples / サンプル数: {train_dataset_group.num_train_images}")
@@ -489,7 +491,7 @@ def train(args):
         loss_total = 0
         for step, batch in enumerate(train_dataloader):
             current_step.value = global_step
-            # with accelerator.accumulate(training_models[0]):  # 複数モデルに対応していない模様だがとりあえずこうしておく
+            # with accelerator.accumulate(training_models[0]):  # Does not seem to support multiple models, anyway do this first
             if True:
                 if "latents" in batch and batch["latents"] is not None:
                     latents = batch["latents"].to(accelerator.device).to(dtype=weight_dtype)
@@ -571,7 +573,7 @@ def train(args):
                 )
                 
 
-                # 指定ステップごとにモデルを保存
+                # Save the model for each specified step
                 if args.save_every_n_steps is not None and global_step % args.save_every_n_steps == 0:
                     accelerator.wait_for_everyone()
                     if accelerator.is_main_process:
@@ -590,16 +592,17 @@ def train(args):
                             accelerator.unwrap_model(sdxl_adapter),
                             ckpt_info,
                         )
-                # 指定ステップごとにモデルをlog image
 
+                # log image for each specified ste
                 if args.log_image_every_n_steps is not None and global_step % args.log_image_every_n_steps == 0:
                     accelerator.wait_for_everyone()
                     if accelerator.is_main_process:
                         with torch.no_grad():
-                            samples, _ = inference_samples(unet, vae, controller, ori_img_name, infer_text_embedding, infer_content_embeddings)
+                            samples, _ = inference_samples(unet, vae, controller, ori_img_name, infer_text_embedding,
+                                                           infer_content_embeddings, debug=args.debug)
                             wandb.log({"samples": samples})
 
-            current_loss = loss.detach().item()  # 平均なのでbatch sizeは関係ないはず
+            current_loss = loss.detach().item()  # Since it is an average, the batch size should not matter
             if args.logging_dir is not None:
                 logs = {"loss": current_loss, "lr": float(lr_scheduler.get_last_lr()[0])}
                 if (
@@ -729,6 +732,10 @@ def setup_parser() -> argparse.ArgumentParser:
         "--adapter_resume_path",
         type=str,
         default=None,
+    )
+    parser.add_argument(
+        "--debug",
+        action = "store_true",
     )
 
 

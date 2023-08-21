@@ -1830,7 +1830,7 @@ class T2IAdapterDataset(BaseDataset):
 
         self.num_train_images = 0
         self.num_reg_images = 0
-        self.lineart_model = LineartDetector()
+        # self.lineart_model = LineartDetector()
 
 
         self.transform_adapter_image = transforms.Compose(
@@ -1871,7 +1871,7 @@ class T2IAdapterDataset(BaseDataset):
             for image_key, img_md in list(metadata.items()):
                 
                 # get lineart image
-                lineart_dir = os.path.join(subset.lineart_dir, os.path.basename(os.path.dirname(image_key)))
+                lineart_dir = os.path.join(subset.lineart_dir, os.path.basename(os.path.dirname(image_key)))      # train
                 # lineart_dir = os.path.dirname(image_key).replace('image', 'depth')        # debug
                 os.makedirs(lineart_dir, exist_ok=True)
                 model_type = "midas_v21_small_256"
