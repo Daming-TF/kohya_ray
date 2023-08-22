@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" serverName="mingjiahui@118.193.96.212:22 password" remoteFilesAllowedToDisappearOnAutoupload="false">
+  <component name="PublishConfigData" serverName="server:212" remoteFilesAllowedToDisappearOnAutoupload="false">
     <serverData>
       <paths name="mingjiahui@118.193.96.212:22 password">
         <serverdata>
@@ -9,7 +9,14 @@
           </mappings>
         </serverdata>
       </paths>
-      <paths name="server1">
+      <paths name="server:212">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/mingjiahui/project/kohya_ray" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="server:217">
         <serverdata>
           <mappings>
             <mapping deploy="/home/mingjiahui/project/kohya_ray" local="$PROJECT_DIR$" web="/" />

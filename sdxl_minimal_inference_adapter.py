@@ -67,9 +67,8 @@ def get_timestep_embedding(x, outdim):
 
 
 if __name__ == "__main__":
-    # 画像生成条件を変更する場合はここを変更 / change here to change image generation conditions
-
-    # SDXLの追加のvector embeddingへ渡す値 / Values to pass to additional vector embedding of SDXL
+    # change here to change image generation conditions
+    # Values to pass to additional vector embedding of SDXL
     target_height = 1024
     target_width = 1024
     original_height = target_height
@@ -158,8 +157,8 @@ if __name__ == "__main__":
     text_model2.to(DEVICE, dtype=DTYPE)
     text_model2.eval()
 
-    unet.set_use_memory_efficient_attention(True, False)
-    vae.set_use_memory_efficient_attention_xformers(True)
+    unet.set_use_memory_efficient_attention(True, False)        # xformers: bool, mem_eff: bool
+    vae.set_use_memory_efficient_attention_xformers(True)       # xformers
 
     # Tokenizers
     tokenizer1 = CLIPTokenizer.from_pretrained(text_encoder_1_name)
@@ -180,10 +179,10 @@ if __name__ == "__main__":
 
     # scheduler
     scheduler = EulerDiscreteScheduler(
-        num_train_timesteps=SCHEDULER_TIMESTEPS,
-        beta_start=SCHEDULER_LINEAR_START,
-        beta_end=SCHEDULER_LINEAR_END,
-        beta_schedule=SCHEDLER_SCHEDULE,
+        num_train_timesteps=SCHEDULER_TIMESTEPS,    # 1000
+        beta_start=SCHEDULER_LINEAR_START,          # 0.00085
+        beta_end=SCHEDULER_LINEAR_END,              # 0.0120
+        beta_schedule=SCHEDLER_SCHEDULE,            # "scaled_linear"
     )
 
     def generate_image(prompt, negative_prompt, seed=None, model_name=None, lineart_path=None):

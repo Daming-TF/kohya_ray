@@ -1110,13 +1110,14 @@ class SdxlUNet2DConditionModel(nn.Module):
 
         # h = x.type(self.dtype)
         h = x
+        norm_dim = [1,2,3]
         for i, module in enumerate(self.input_blocks):
             if i == 3 and adapter_features is not None and len(adapter_features) > 0:
                 h = call_module(module, h, emb, context)
 
                 # # Repair scale problem
-                adapter_features[0] = torch.std(h, dim=[1,2,3], keepdim=True) * (adapter_features[0] - torch.mean(adapter_features[0], dim=[2,3], keepdim=True)) \
-                                        / torch.std(adapter_features[0], dim=[2,3], keepdim=True) + torch.mean(h, dim=[1,2,3], keepdim=True)
+                adapter_features[0] = torch.std(h, dim=norm_dim, keepdim=True) * (adapter_features[0] - torch.mean(adapter_features[0], dim=norm_dim, keepdim=True)) \
+                                        / torch.std(adapter_features[0], dim=norm_dim, keepdim=True) + torch.mean(h, dim=norm_dim, keepdim=True)
                 h = h + adapter_features.pop(0)
 
                 # # cocktail
@@ -1128,8 +1129,8 @@ class SdxlUNet2DConditionModel(nn.Module):
                 h = call_module(module, h, emb, context)
 
                 # Repair scale problem
-                adapter_features[0] = torch.std(h, dim=[1,2,3], keepdim=True) * (adapter_features[0] - torch.mean(adapter_features[0], dim=[1,2,3], keepdim=True)) \
-                                        / torch.std(adapter_features[0], dim=[1,2,3], keepdim=True) + torch.mean(h, dim=[1,2,3], keepdim=True)
+                adapter_features[0] = torch.std(h, dim=norm_dim, keepdim=True) * (adapter_features[0] - torch.mean(adapter_features[0], dim=norm_dim, keepdim=True)) \
+                                        / torch.std(adapter_features[0], dim=norm_dim, keepdim=True) + torch.mean(h, dim=norm_dim, keepdim=True)
                 h = h + adapter_features.pop(0)
 
                 # # cocktail
@@ -1141,8 +1142,8 @@ class SdxlUNet2DConditionModel(nn.Module):
                 h = call_module(module, h, emb, context)
 
                 # Repair scale problem
-                adapter_features[0] = torch.std(h, dim=[1,2,3], keepdim=True) * (adapter_features[0] - torch.mean(adapter_features[0], dim=[2,3], keepdim=True)) \
-                                        / torch.std(adapter_features[0], dim=[2,3], keepdim=True) + torch.mean(h, dim=[1,2,3], keepdim=True)
+                adapter_features[0] = torch.std(h, dim=norm_dim, keepdim=True) * (adapter_features[0] - torch.mean(adapter_features[0], dim=norm_dim, keepdim=True)) \
+                                        / torch.std(adapter_features[0], dim=norm_dim, keepdim=True) + torch.mean(h, dim=norm_dim, keepdim=True)
                 h = h + adapter_features.pop(0)
 
                 # # trying

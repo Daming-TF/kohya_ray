@@ -134,20 +134,29 @@ def inference_samples(unet, vae, controller, ori_image_path, text_embeddings, co
             else os.path.join('/mnt/nfs/file_server/public/mingjiahui/data/LAION12M-highreso/depth', os.path.basename(img_dir))   # debug
         # condition_dir = os.path.join('/mnt/nfs/file_server/public/mingjiahui/data/LAION12M-highreso/depth', os.path.basename(img_dir))      # train
         condition_name = os.path.splitext(img_name)[0] + '-' + model_type + '.png'
-        sketch_image_path = os.path.join(condition_dir, condition_name)
-        sketch_image = np.array(Image.open(sketch_image_path).convert('L')) # HxWx3 0-255
+        condition_image_path = os.path.join(condition_dir, condition_name)
+        # sketch_image = np.array(Image.open(sketch_image_path).convert('L')) # HxWx3 0-255
+        condition_image = np.array(Image.open(condition_image_path))
+
         test_image = image[i].permute(1, 2, 0).cpu().numpy() # HxWx3 0-1
         test_image = (test_image * 255.).astype(np.uint8)
+        test_image = np.array(Image.fromarray(test_image).resize((ori_image.shape[1], ori_image.shape[0])))
+
         caption_path = os.path.splitext(ori_image_path[i])[0] + ".txt"
         caption_data = open(caption_path, "r").read().strip()
-        samples1 = wandb.Image(ori_image, caption=f"Original: {caption_data}")
-        samples2 = wandb.Image(test_image, caption=f"Sample: {caption_data}")
-        samples3 = wandb.Image(sketch_image, caption=f"Sketch")
-        
-        samples.append(samples1)
-        samples.append(samples2)
-        samples.append(samples3)
-    return samples, latents_dict
+
+        # # version:[accelerator init tracker]
+        # samples1 = wandb.Image(ori_image, caption=f"Original: {caption_data}")
+        # samples2 = wandb.Image(test_image, caption=f"Sample: {caption_data}")
+        # samples3 = wandb.Image(sketch_image, caption=f"Depth")
+        # samples.append(samples1)
+        # samples.append(samples2)
+        # samples.append(samples3)
+
+        # VERSION:[wabdb]
+        # concat_img = np.hstack((ori_image, test_image, condition_image)).astype(np.uint8)
+        samples.append((ori_image, test_image, condition_image))
+    return samples, latents_dict, caption_data
 
 
 
@@ -261,6 +270,7 @@ def train(args):
     ) = sdxl_train_util.load_target_model(args, accelerator, "sdxl", weight_dtype)
 
     #NOTE: add adapter models
+    load_resume = None
     if args.adapter_resume_path is None:
         sdxl_adapter = SdxlT2IAdapter(sk=True, use_conv=False)
     else:
@@ -475,7 +485,8 @@ def train(args):
     prepare_scheduler_for_custom_training(noise_scheduler, accelerator.device)
 
     if accelerator.is_main_process:
-        accelerator.init_trackers("xl-adapter" if args.log_tracker_name is None else args.log_tracker_name)
+        wandb.init(project='xl-adapter', name=args.exp_name)
+        # accelerator.init_trackers("xl-adapter" if args.log_tracker_name is None else args.log_tracker_name)
 
     controller = None
     infer_text_embedding = None
@@ -486,7 +497,7 @@ def train(args):
     (start_epoch, global_step) = (0, 0) if load_resume is None else ckpt_info
     print(f'start epoch:{start_epoch}\ttrain epoch:{num_train_epochs}')
     assert start_epoch <= num_train_epochs
-    print()
+    print(f'Exp name:{args.exp_name}')
     for epoch in range(start_epoch, num_train_epochs):
         accelerator.print(f"\nepoch {epoch+1}/{num_train_epochs}")
         current_epoch.value = epoch + 1
@@ -497,6 +508,7 @@ def train(args):
         loss_total = 0
         for step, batch in enumerate(train_dataloader):
             current_step.value = global_step
+            wandb_state = {}
             # with accelerator.accumulate(training_models[0]):  # Does not seem to support multiple models, anyway do this first
             if True:
                 if "latents" in batch and batch["latents"] is not None:
@@ -603,9 +615,35 @@ def train(args):
                     accelerator.wait_for_everyone()
                     if accelerator.is_main_process:
                         with torch.no_grad():
-                            samples, _ = inference_samples(unet, vae, controller, ori_img_name, infer_text_embedding,
+                            samples, _, caption_data = inference_samples(unet, vae, controller, ori_img_name, infer_text_embedding,
                                                            infer_content_embeddings, debug=args.debug)
-                            wandb.log({"samples": samples})
+
+                            if accelerator.is_main_process:
+                                # version:[acceletor tracker]
+                                # wandb.log({"samples": samples})
+
+                                # version:[wandb]
+                                for i, (ori_img, sample_img, depth_img) in enumerate(samples):
+                                    # w, h = sample.size
+                                    # sample = np.array(sample).astype(np.uint8)
+
+                                    # wandb_state[f"Original\t|\tSample\t|\tDepth"] = [
+                                    #     wandb.Image(sample, caption=caption_data)]
+                                    wandb_state['Original\t|\tSample\t|\tDepth'] = [
+                                        wandb.Image(ori_img, caption=caption_data),
+                                        wandb.Image(sample_img, caption=caption_data),
+                                        wandb.Image(depth_img, caption=caption_data),
+                                    ]
+
+                                    import cv2
+                                    pre_fix = f'index{i}_epoch{epoch}_step{global_step}'
+                                    cv2.imwrite(os.path.join(args.output_dir, pre_fix+'_ori.png'),
+                                                cv2.cvtColor(ori_img, cv2.COLOR_RGB2BGR))
+                                    cv2.imwrite(os.path.join(args.output_dir, pre_fix + '_sample.png'),
+                                                cv2.cvtColor(sample_img, cv2.COLOR_RGB2BGR))
+                                    cv2.imwrite(os.path.join(args.output_dir, pre_fix + '_depth.png'),
+                                                cv2.cvtColor(depth_img, cv2.COLOR_RGB2BGR))
+
 
             current_loss = loss.detach().item()  # Since it is an average, the batch size should not matter
             if args.logging_dir is not None:
@@ -616,7 +654,20 @@ def train(args):
                     logs["lr/d*lr"] = (
                         lr_scheduler.optimizers[0].param_groups[0]["d"] * lr_scheduler.optimizers[0].param_groups[0]["lr"]
                     )
-                accelerator.log(logs, step=global_step)
+
+                # # version:[acceletor tracker]
+                # accelerator.log(logs, step=global_step)
+
+                # version:[wandb]
+                wandb_state.update(logs)
+
+            if accelerator.is_main_process:
+                # # version:[acceletor tracker]
+                # wandb.log(logs, step=global_step)
+
+                # version:[wandb]
+                wandb.log(wandb_state, step=global_step)
+
 
             # TODO moving averageにする
             loss_total += current_loss
@@ -629,7 +680,9 @@ def train(args):
 
         if args.logging_dir is not None:
             logs = {"loss/epoch": loss_total / len(train_dataloader)}
-            accelerator.log(logs, step=epoch + 1)
+            # accelerator.log(logs, step=epoch + 1)
+            if accelerator.is_main_process:
+                wandb.log(logs, step=epoch + 1)
 
         accelerator.wait_for_everyone()
 
@@ -738,9 +791,16 @@ def setup_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
     )
+
+    # my add
     parser.add_argument(
         "--debug",
         action = "store_true",
+    )
+    parser.add_argument(
+        "--exp_name",
+        type = str,
+        default='debug'
     )
 
 
